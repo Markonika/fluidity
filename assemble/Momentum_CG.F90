@@ -65,6 +65,7 @@
     use petsc_solve_state_module, only: petsc_solve
     use coriolis_module, only: coriolis, set_coriolis_parameters
     use upwind_stabilisation, only: make_supg_element, supg_test_function, element_upwind_stabilisation, get_upwind_options
+    use directional_element_length_module, only: directional_element_length
     use les_module
     use multiphase_module
     use state_matrices_module, only: get_pressure_stabilisation_matrix
@@ -144,9 +145,17 @@
     integer :: stabilisation_scheme
     integer, parameter :: STABILISATION_NONE=0
     integer, parameter :: STABILISATION_STREAMLINE_UPWIND=1, &
-      & STABILISATION_SUPG=2
+      & STABILISATION_SUPG=2, STABILISATION_VMS=3
     integer :: nu_bar_scheme
     real :: nu_bar_scale = 1.0
+
+    ! VMS stabilisation constants (Coupez & Hachem 2013, eq. 13), tuneable
+    ! via schema since the papers reference literature values without
+    ! fixing them to a single pair; c1=4.0, c2=2.0 follow common choices
+    ! for linear elements in the Tezduyar-family tau_C literature cited
+    ! by the papers ([16,17] in Coupez & Hachem 2013).
+    real :: c1_vms = 4.0
+    real :: c2_vms = 2.0
 
     ! LES coefficients and options
     real :: smagorinsky_coefficient
@@ -645,6 +654,14 @@
         do i = 1, num_threads
            supg_element(i)=make_supg_element(ele_shape(u,1))
         enddo
+      else if(have_option(trim(u%option_path)//"/prognostic/spatial_discretisation/continuous_galerkin/stabilisation/vms")) then
+        stabilisation_scheme = STABILISATION_VMS
+        call get_option(trim(u%option_path) // &
+          & "/prognostic/spatial_discretisation/continuous_galerkin/stabilisation/vms/c1", &
+          & c1_vms, default=4.0)
+        call get_option(trim(u%option_path) // &
+          & "/prognostic/spatial_discretisation/continuous_galerkin/stabilisation/vms/c2", &
+          & c2_vms, default=2.0)
       else
         stabilisation_scheme = STABILISATION_NONE
       end if
@@ -1277,6 +1294,14 @@
       integer :: dim, i, j
       type(element_type) :: test_function
 
+      ! VMS stabilisation parameters (Coupez & Hachem 2013, eq. 13-14):
+      ! a single tau_K, tau_C per element, from a directional (streamline-
+      ! aligned) element length when the element carries a non-negligible
+      ! velocity, falling back to an isotropic gradient-norm length scale
+      ! otherwise (e.g. at start-up from a zero initial condition).
+      real :: tau_k_ele, tau_c_ele, h_k_ele, rho_ele, mu_ele, v_mag_ele
+      real, dimension(u%dim) :: ele_velocity_mean
+
       if(move_mesh) then
         ! we've assumed the following in the declarations
         ! above so we better make sure they're true!
@@ -1290,7 +1315,8 @@
       rhs_addto = 0.0
       ! we always want things added to the diagonal blocks
       ! but we must check if we have_coriolis to add things to the others
-      if(have_coriolis.or.(have_viscosity.and.(stress_form.or.partial_stress_form))) then
+      if(have_coriolis.or.(have_viscosity.and.(stress_form.or.partial_stress_form)).or.&
+        & stabilisation_scheme==STABILISATION_VMS) then
         block_mask = .true.
       else
         block_mask = .false.
@@ -1403,6 +1429,40 @@
          end if
       end if
 
+      if(stabilisation_scheme==STABILISATION_VMS) then
+        ele_velocity_mean = sum(ele_val(nu, ele), 2) / real(ele_loc(u, ele))
+        v_mag_ele = norm2(ele_velocity_mean)
+
+        h_k_ele = directional_element_length(ele_velocity_mean, du_t(:,1,:))
+        if(h_k_ele <= 0.0) then
+          ! No well-defined flow direction (e.g. zero initial condition):
+          ! fall back to an isotropic gradient-norm element length.
+          h_k_ele = 2.0 / maxval(norm2(du_t(:,1,:), 2))
+        end if
+
+        rho_ele = sum(ele_val_at_quad(density, ele)) / real(ele_ngi(density, ele))
+
+        if(have_viscosity) then
+          mu_ele = 0.0
+          do i=1,u%dim
+            mu_ele = mu_ele + sum(ele_val_at_quad(viscosity, i, i, ele))
+          end do
+          mu_ele = mu_ele / real(u%dim * ele_ngi(viscosity, ele))
+        else
+          mu_ele = 0.0
+        end if
+
+        tau_k_ele = 1.0 / sqrt( (2.0*rho_ele/dt)**2 + &
+          & (2.0*rho_ele*v_mag_ele/h_k_ele)**2 + &
+          & (4.0*mu_ele/h_k_ele**2)**2 )
+
+        tau_c_ele = sqrt( (mu_ele/max(rho_ele, epsilon(0.0)))**2 + &
+          & (c2_vms*v_mag_ele/(c1_vms*h_k_ele))**2 )
+      else
+        tau_k_ele = 0.0
+        tau_c_ele = 0.0
+      end if
+
       ! Step 3: Assemble contributions
 
       ! Mass terms
@@ -1413,7 +1473,16 @@
 
       ! Advection terms
       if(.not. exclude_advection) then
-        call add_advection_element_cg(ele, test_function, u, oldu_val, nu, ug, density, viscosity, nvfrac, du_t, dug_t, dnvfrac_t, detwei, J_mat, big_m_tensor_addto, rhs_addto)
+        call add_advection_element_cg(ele, test_function, u, oldu_val, nu, ug, density, viscosity, nvfrac, du_t, dug_t, dnvfrac_t, detwei, J_mat, big_m_tensor_addto, rhs_addto, tau_k_ele)
+      end if
+
+      ! VMS grad-div stabilisation term (Coupez & Hachem 2013, eq. 11,
+      ! grad-div stabilization term): couples all velocity components
+      ! through their divergence, which is what lets equal-order
+      ! elements stay stable together with the kmk pressure
+      ! stabilisation already present in the pressure correction step.
+      if(stabilisation_scheme==STABILISATION_VMS) then
+        call add_vms_graddiv_element_cg(ele, u, oldu_val, du_t, detwei, tau_c_ele, big_m_tensor_addto, rhs_addto)
       end if
 
       ! Source terms
@@ -1599,7 +1668,7 @@
 
     end subroutine add_mass_element_cg
 
-    subroutine add_advection_element_cg(ele, test_function, u, oldu_val, nu, ug,  density, viscosity, nvfrac, du_t, dug_t, dnvfrac_t, detwei, J_mat, big_m_tensor_addto, rhs_addto)
+    subroutine add_advection_element_cg(ele, test_function, u, oldu_val, nu, ug,  density, viscosity, nvfrac, du_t, dug_t, dnvfrac_t, detwei, J_mat, big_m_tensor_addto, rhs_addto, tau_k)
       integer, intent(in) :: ele
       type(element_type), intent(in) :: test_function
       type(vector_field), intent(in) :: u
@@ -1616,13 +1685,17 @@
       real, dimension(u%dim, u%dim, ele_ngi(u,ele)) :: J_mat, diff_q
       real, dimension(u%dim, u%dim, ele_loc(u, ele), ele_loc(u, ele)), intent(inout) :: big_m_tensor_addto
       real, dimension(u%dim, ele_loc(u, ele)), intent(inout) :: rhs_addto
+      ! VMS stabilisation parameter for this element (Coupez & Hachem 2013,
+      ! eq. 13). Unused unless stabilisation_scheme==STABILISATION_VMS.
+      real, intent(in) :: tau_k
 
-      integer :: dim, i, j
+      integer :: dim, i, j, gi, aloc
       real, dimension(ele_ngi(u, ele)) :: density_gi, div_relu_gi
       real, dimension(ele_ngi(u, ele)) :: nvfrac_gi, relu_dot_grad_nvfrac_gi
       real, dimension(u%dim, ele_ngi(u, ele)) :: grad_nvfrac_gi
       real, dimension(ele_loc(u, ele), ele_loc(u, ele)) :: advection_mat
       real, dimension(u%dim, ele_ngi(u, ele)) :: relu_gi
+      real, dimension(ele_loc(u, ele), ele_ngi(u, ele)) :: vms_adv_test, vms_weighted_adv_test
       type(element_type), pointer :: u_shape
 
       ! In case we have to multiply detwei by various coefficients (e.g. the density values at the Gauss points),
@@ -1705,6 +1778,24 @@
                  & element_upwind_stabilisation(u_shape, du_t, relu_gi, J_mat, detwei, &
                  & nu_bar_scheme = nu_bar_scheme, nu_bar_scale = nu_bar_scale)
          end if
+      case(STABILISATION_VMS)
+         ! Residual-based VMS momentum stabilisation (Coupez & Hachem
+         ! 2013, eq. 11): tau_K (rho u_h . grad(w_h), rho u_h . grad(u_h)).
+         ! The convective part of the momentum residual tested against
+         ! the advective derivative of the test function. (The pressure-
+         ! gradient and transient parts of the full residual are handled
+         ! separately: pressure coupling through Fluidity's existing
+         ! projection-method pressure correction, and the transient part
+         ! is omitted here as a standard simplification for the
+         ! steady/pseudo-steady flows this stabilisation targets.)
+         do gi=1,ele_ngi(u, ele)
+            do aloc=1,ele_loc(u, ele)
+               vms_adv_test(aloc, gi) = dot_product(relu_gi(:, gi), du_t(aloc, gi, :))
+            end do
+            vms_weighted_adv_test(:, gi) = vms_adv_test(:, gi) * &
+                 & sqrt(max(tau_k, 0.0) * density_gi(gi) * detwei(gi))
+         end do
+         advection_mat = advection_mat + matmul(vms_weighted_adv_test, transpose(vms_weighted_adv_test))
       end select
 
       do dim = 1, u%dim
@@ -1713,6 +1804,38 @@
       end do
 
     end subroutine add_advection_element_cg
+
+    subroutine add_vms_graddiv_element_cg(ele, u, oldu_val, du_t, detwei, tau_c, big_m_tensor_addto, rhs_addto)
+      !!< VMS grad-div stabilisation term (Coupez & Hachem 2013, eq. 11):
+      !!<   tau_C (div(u_h), div(w_h))_K
+      !!< Unlike the advection terms, this couples all velocity
+      !!< components through their divergence, so every (dim1, dim2)
+      !!< block is assembled, not just the diagonal.
+      integer, intent(in) :: ele
+      type(vector_field), intent(in) :: u
+      real, dimension(:,:), intent(in) :: oldu_val
+      real, dimension(ele_loc(u, ele), ele_ngi(u, ele), u%dim), intent(in) :: du_t
+      real, dimension(ele_ngi(u, ele)), intent(in) :: detwei
+      real, intent(in) :: tau_c
+      real, dimension(u%dim, u%dim, ele_loc(u, ele), ele_loc(u, ele)), intent(inout) :: big_m_tensor_addto
+      real, dimension(u%dim, ele_loc(u, ele)), intent(inout) :: rhs_addto
+
+      real, dimension(ele_loc(u, ele), ele_loc(u, ele)) :: graddiv_block
+      integer :: dim1, dim2, gi
+
+      do dim1=1,u%dim
+        do dim2=1,u%dim
+          graddiv_block = 0.0
+          do gi=1,ele_ngi(u, ele)
+            graddiv_block = graddiv_block + (max(tau_c, 0.0)*detwei(gi)) * &
+                 & outer_product(du_t(:,gi,dim1), du_t(:,gi,dim2))
+          end do
+          big_m_tensor_addto(dim1, dim2, :, :) = big_m_tensor_addto(dim1, dim2, :, :) + dt*theta*graddiv_block
+          rhs_addto(dim1, :) = rhs_addto(dim1, :) - matmul(graddiv_block, oldu_val(dim2, :))
+        end do
+      end do
+
+    end subroutine add_vms_graddiv_element_cg
 
     subroutine add_sources_element_cg(ele, test_function, u, density, source, detwei, rhs_addto)
       integer, intent(in) :: ele
