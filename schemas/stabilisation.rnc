@@ -164,13 +164,44 @@ supg_stabilisation = (
    }
 )
 
+vms_stabilisation = (
+   ## Residual-based VMS (variational multiscale) momentum
+   ## stabilisation, adapted from T. Coupez and E. Hachem, "Solution
+   ## of high-Reynolds incompressible flow with stabilized finite
+   ## element and adaptive anisotropic meshing", Comput. Methods Appl.
+   ## Mech. Engrg. 267 (2013) 65-85 (eq. 11, 13, 14) to Fluidity's
+   ## segregated pressure-projection architecture (the paper assumes a
+   ## monolithic coupled velocity-pressure solve).
+   ##
+   ## Adds a residual-based momentum stabilisation term and a grad-div
+   ## term, using stabilisation parameters tau_K, tau_C computed from
+   ## a streamline-aligned (directional) element length. Designed to
+   ## pair with the direction_magnitude_combined anisotropic metric
+   ## and, for equal-order (P1-P1) velocity-pressure, with Fluidity's
+   ## existing P1-P1 pressure stabilisation (the kmk term already
+   ## present in the pressure correction step).
+   ##
+   ## <b>Under testing.</b>
+   element vms {
+      ## Constant c1 in the tau_C formula (eq. 13). Defaults to 4.0.
+      element c1 {
+         real
+      }?,
+      ## Constant c2 in the tau_C formula (eq. 13). Defaults to 2.0.
+      element c2 {
+         real
+      }?
+   }
+)
+
 advection_stabilisation_options = (
    ## Stabilisation options for the galerkin discretisation
    element stabilisation{
       (
          no_stabilisation|
          su_stabilisation|
-         supg_stabilisation
+         supg_stabilisation|
+         vms_stabilisation
       )
    }
 )
