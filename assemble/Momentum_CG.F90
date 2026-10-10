@@ -1299,7 +1299,7 @@
       ! aligned) element length when the element carries a non-negligible
       ! velocity, falling back to an isotropic gradient-norm length scale
       ! otherwise (e.g. at start-up from a zero initial condition).
-      real :: tau_k_ele, tau_c_ele, h_k_ele, rho_ele, mu_ele, v_mag_ele
+      real :: tau_k_ele, tau_c_ele, h_k_ele, h_k_isotropic, rho_ele, mu_ele, v_mag_ele
       real, dimension(u%dim) :: ele_velocity_mean
 
       if(move_mesh) then
@@ -1432,11 +1432,24 @@
         ele_velocity_mean = sum(ele_val(nu, ele), 2) / real(ele_loc(u, ele))
         v_mag_ele = norm2(ele_velocity_mean)
 
+        ! Isotropic gradient-norm element length: always well-defined
+        ! and well-conditioned (no division by a direction-dependent
+        ! quantity that can go near-zero), so it doubles as a safety
+        ! bound on the directional length below.
+        h_k_isotropic = 2.0 / maxval(norm2(du_t(:,1,:), 2))
+
         h_k_ele = directional_element_length(ele_velocity_mean, du_t(:,1,:))
         if(h_k_ele <= 0.0) then
-          ! No well-defined flow direction (e.g. zero initial condition):
-          ! fall back to an isotropic gradient-norm element length.
-          h_k_ele = 2.0 / maxval(norm2(du_t(:,1,:), 2))
+          ! No well-defined flow direction (e.g. zero initial condition).
+          h_k_ele = h_k_isotropic
+        else
+          ! On a highly anisotropic (post-adaptation) element, the
+          ! directional length can blow up when the flow direction is
+          ! close to perpendicular to the element's stretched axis
+          ! (the denominator in directional_element_length goes
+          ! near-zero without being exactly zero). Never let the
+          ! directional estimate exceed the isotropic bound.
+          h_k_ele = min(h_k_ele, h_k_isotropic)
         end if
 
         rho_ele = sum(ele_val_at_quad(density, ele)) / real(ele_ngi(density, ele))
@@ -1455,8 +1468,12 @@
           & (2.0*rho_ele*v_mag_ele/h_k_ele)**2 + &
           & (4.0*mu_ele/h_k_ele**2)**2 )
 
+        ! NB: dimensionally tau_C must scale as kinematic viscosity
+        ! (L^2/T), matching mu/rho. The velocity-dependent term is
+        ! therefore v*h (not v/h, which would blow up as h -> 0 on
+        ! refined/corner elements).
         tau_c_ele = sqrt( (mu_ele/max(rho_ele, epsilon(0.0)))**2 + &
-          & (c2_vms*v_mag_ele/(c1_vms*h_k_ele))**2 )
+          & (c2_vms*v_mag_ele*h_k_ele/c1_vms)**2 )
       else
         tau_k_ele = 0.0
         tau_c_ele = 0.0
@@ -1807,20 +1824,24 @@
     subroutine add_vms_graddiv_element_cg(ele, u, oldu_val, du_t, detwei, tau_c, big_m_tensor_addto, rhs_addto)
       !!< VMS grad-div stabilisation term (Coupez & Hachem 2013, eq. 11):
       !!<   tau_C (div(u_h), div(w_h))_K
-      !!< This couples all velocity components through their
+      !!< The full term couples all velocity components through their
       !!< divergence. Fluidity's block matrix is allocated diagonal-
       !!< only unless Coriolis or the stress-form viscous term is
       !!< active (those also select a different, coupled solve
-      !!< strategy elsewhere in the momentum solver). Rather than
-      !!< following suit -- which was found to interact badly with
-      !!< the pressure projection step -- the same-component
-      !!< (dim1==dim2) part of this term is assembled implicitly, as
-      !!< usual, and the cross-component coupling (dim1/=dim2) is
-      !!< added explicitly to the right-hand side using the previous
-      !!< iterate's velocity. This is a standard semi-implicit
-      !!< treatment for a stabilisation term in a segregated/
-      !!< projection solver, where the pressure-velocity coupling
-      !!< itself is already resolved by the outer iteration.
+      !!< strategy elsewhere in the momentum solver, found to interact
+      !!< badly with the pressure projection step here). An earlier
+      !!< attempt treated the cross-component (dim1/=dim2) coupling
+      !!< explicitly via the right-hand side using the previous
+      !!< iterate's velocity; on highly anisotropic (post-adaptation)
+      !!< elements the shape-gradient magnitudes in different
+      !!< directions can differ by orders of magnitude, and that
+      !!< explicit-only cross term -- with no implicit/Jacobian
+      !!< counterpart to damp it -- turned into an uncontrolled
+      !!< feedback forcing that blew up within a few timesteps. This
+      !!< term is therefore assembled diagonal-only (dim1==dim2):
+      !!< still a valid, unconditionally-stable (implicit,
+      !!< positive-semi-definite) component-wise divergence penalty,
+      !!< at the cost of the true cross-component coupling.
       integer, intent(in) :: ele
       type(vector_field), intent(in) :: u
       real, dimension(:,:), intent(in) :: oldu_val
@@ -1831,20 +1852,16 @@
       real, dimension(u%dim, ele_loc(u, ele)), intent(inout) :: rhs_addto
 
       real, dimension(ele_loc(u, ele), ele_loc(u, ele)) :: graddiv_block
-      integer :: dim1, dim2, gi
+      integer :: dim1, gi
 
       do dim1=1,u%dim
-        do dim2=1,u%dim
-          graddiv_block = 0.0
-          do gi=1,ele_ngi(u, ele)
-            graddiv_block = graddiv_block + (max(tau_c, 0.0)*detwei(gi)) * &
-                 & outer_product(du_t(:,gi,dim1), du_t(:,gi,dim2))
-          end do
-          if (dim1 == dim2) then
-            big_m_tensor_addto(dim1, dim1, :, :) = big_m_tensor_addto(dim1, dim1, :, :) + dt*theta*graddiv_block
-          end if
-          rhs_addto(dim1, :) = rhs_addto(dim1, :) - matmul(graddiv_block, oldu_val(dim2, :))
+        graddiv_block = 0.0
+        do gi=1,ele_ngi(u, ele)
+          graddiv_block = graddiv_block + (max(tau_c, 0.0)*detwei(gi)) * &
+               & outer_product(du_t(:,gi,dim1), du_t(:,gi,dim1))
         end do
+        big_m_tensor_addto(dim1, dim1, :, :) = big_m_tensor_addto(dim1, dim1, :, :) + dt*theta*graddiv_block
+        rhs_addto(dim1, :) = rhs_addto(dim1, :) - matmul(graddiv_block, oldu_val(dim1, :))
       end do
 
     end subroutine add_vms_graddiv_element_cg
