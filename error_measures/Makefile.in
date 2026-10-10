@@ -55,7 +55,7 @@ OBJS = Form_metric.o Assemble_metric.o Interpolation_metric.o Edge_lengths.o \
      Recovery_estimator.o Aspect_ratios.o Interpolation_error.o Geometric_constraints_metric.o Goals.o Goal_metric.o \
      Conformity_measurement.o Metric_advection.o  Mba_adapt.o Limit_metric.o Anisotropic_gradation_metric.o \
      Project_metric_to_surface.o Field_preprocessing.o Anisotropic_ZZ.o Richardson_metric.o \
-     Reference_Meshes.o Huang_metric.o
+     Reference_Meshes.o Huang_metric.o Anisotropic_Vector_Metric.o
 
 .SUFFIXES: .F90 .c .o .a
 

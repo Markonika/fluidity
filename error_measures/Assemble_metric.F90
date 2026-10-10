@@ -38,6 +38,7 @@ module metric_assemble
   use anisotropic_gradation
   use richardson_metric_module
   use anisotropic_zz_module
+  use anisotropic_vector_metric
   use reference_meshes
   use hadapt_metric_based_extrude, only: get_1d_mesh, recombine_metric, get_1d_tensor
 
@@ -111,6 +112,8 @@ module metric_assemble
       call form_interpolation_metric(state, error_metric)
       call halo_update(error_metric)
       call form_anisotropic_zz_metric(state, error_metric)
+      call form_vector_interpolation_metric(state, error_metric)
+      call halo_update(error_metric)
     end if
 
     if (use_richardson_number_metric) then
