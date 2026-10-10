@@ -31,6 +31,7 @@ module anisotropic_vector_metric
 
   use spud
   use fldebug
+  use global_parameters, only: OPTION_PATH_LEN
   use vector_tools
   use metric_tools
   use sparse_tools

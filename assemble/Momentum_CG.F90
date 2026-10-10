@@ -1315,8 +1315,7 @@
       rhs_addto = 0.0
       ! we always want things added to the diagonal blocks
       ! but we must check if we have_coriolis to add things to the others
-      if(have_coriolis.or.(have_viscosity.and.(stress_form.or.partial_stress_form)).or.&
-        & stabilisation_scheme==STABILISATION_VMS) then
+      if(have_coriolis.or.(have_viscosity.and.(stress_form.or.partial_stress_form))) then
         block_mask = .true.
       else
         block_mask = .false.
@@ -1793,7 +1792,7 @@
                vms_adv_test(aloc, gi) = dot_product(relu_gi(:, gi), du_t(aloc, gi, :))
             end do
             vms_weighted_adv_test(:, gi) = vms_adv_test(:, gi) * &
-                 & sqrt(max(tau_k, 0.0) * density_gi(gi) * detwei(gi))
+                 & sqrt(max(tau_k, 0.0) * density_gi(gi) * abs(detwei(gi)))
          end do
          advection_mat = advection_mat + matmul(vms_weighted_adv_test, transpose(vms_weighted_adv_test))
       end select
@@ -1808,9 +1807,20 @@
     subroutine add_vms_graddiv_element_cg(ele, u, oldu_val, du_t, detwei, tau_c, big_m_tensor_addto, rhs_addto)
       !!< VMS grad-div stabilisation term (Coupez & Hachem 2013, eq. 11):
       !!<   tau_C (div(u_h), div(w_h))_K
-      !!< Unlike the advection terms, this couples all velocity
-      !!< components through their divergence, so every (dim1, dim2)
-      !!< block is assembled, not just the diagonal.
+      !!< This couples all velocity components through their
+      !!< divergence. Fluidity's block matrix is allocated diagonal-
+      !!< only unless Coriolis or the stress-form viscous term is
+      !!< active (those also select a different, coupled solve
+      !!< strategy elsewhere in the momentum solver). Rather than
+      !!< following suit -- which was found to interact badly with
+      !!< the pressure projection step -- the same-component
+      !!< (dim1==dim2) part of this term is assembled implicitly, as
+      !!< usual, and the cross-component coupling (dim1/=dim2) is
+      !!< added explicitly to the right-hand side using the previous
+      !!< iterate's velocity. This is a standard semi-implicit
+      !!< treatment for a stabilisation term in a segregated/
+      !!< projection solver, where the pressure-velocity coupling
+      !!< itself is already resolved by the outer iteration.
       integer, intent(in) :: ele
       type(vector_field), intent(in) :: u
       real, dimension(:,:), intent(in) :: oldu_val
@@ -1830,7 +1840,9 @@
             graddiv_block = graddiv_block + (max(tau_c, 0.0)*detwei(gi)) * &
                  & outer_product(du_t(:,gi,dim1), du_t(:,gi,dim2))
           end do
-          big_m_tensor_addto(dim1, dim2, :, :) = big_m_tensor_addto(dim1, dim2, :, :) + dt*theta*graddiv_block
+          if (dim1 == dim2) then
+            big_m_tensor_addto(dim1, dim1, :, :) = big_m_tensor_addto(dim1, dim1, :, :) + dt*theta*graddiv_block
+          end if
           rhs_addto(dim1, :) = rhs_addto(dim1, :) - matmul(graddiv_block, oldu_val(dim2, :))
         end do
       end do

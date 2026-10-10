@@ -98,7 +98,8 @@ module interpolation_metric
         end if
 
         if (have_adapt_opt(trim(field_v%option_path), "/adaptivity_options") &
-          & .and. .not. have_adapt_opt(trim(field_s%option_path), "/adaptivity_options/no_interpolation_measure")) then
+          & .and. .not. have_adapt_opt(trim(field_s%option_path), "/adaptivity_options/no_interpolation_measure") &
+          & .and. .not. have_adapt_opt(trim(field_v%option_path), "/adaptivity_options/direction_magnitude_combined")) then
           adweit_v = extract_vector_field(state(i), trim(field_v%name) // "InterpolationErrorBound")
           do k=1,field_v%dim
             adweit_s = extract_scalar_field(adweit_v, k)

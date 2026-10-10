@@ -257,6 +257,37 @@ Source: Fluidity/ICOM manual draft version 1.2</a:documentation>
               <ref name="real_dim_vector"/>
             </element>
           </element>
+          <element name="direction_magnitude_combined">
+            <a:documentation>Build a single combined anisotropic metric from this
+vector field's *normalised direction* and *normalised
+magnitude*, instead of one metric per scalar component
+intersected together. This lets mesh refinement follow
+streamline curvature independently of local field
+magnitude, so weak features (e.g. secondary/corner
+vortices in a high-Reynolds flow) are refined as
+reliably as strong ones.
+
+Coupez and Hachem, "Solution of high-Reynolds
+incompressible flow with stabilized finite element and
+adaptive anisotropic meshing", Comput. Methods Appl.
+Mech. Engrg. 267 (2013) 65-85, Sections 2-3.</a:documentation>
+            <optional>
+              <element name="p_norm">
+                <a:documentation>Exponent used when solving for the edge stretching
+factor under the fixed target_nodes constraint.
+Defaults to 1.5, following the paper.</a:documentation>
+                <ref name="real"/>
+              </element>
+            </optional>
+            <optional>
+              <element name="target_nodes">
+                <a:documentation>Target total number of mesh nodes the metric is
+scaled to produce. Defaults to the current (global)
+node count if omitted.</a:documentation>
+                <ref name="integer"/>
+              </element>
+            </optional>
+          </element>
         </choice>
         <ref name="adaptivity_preprocessing"/>
       </element>

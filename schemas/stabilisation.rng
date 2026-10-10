@@ -185,6 +185,39 @@ is not integrated by parts.
       <ref name="nu_scale_supg"/>
     </element>
   </define>
+  <define name="vms_stabilisation">
+    <element name="vms">
+      <a:documentation>Residual-based VMS (variational multiscale) momentum
+stabilisation, adapted from T. Coupez and E. Hachem, "Solution
+of high-Reynolds incompressible flow with stabilized finite
+element and adaptive anisotropic meshing", Comput. Methods Appl.
+Mech. Engrg. 267 (2013) 65-85 (eq. 11, 13, 14) to Fluidity's
+segregated pressure-projection architecture (the paper assumes a
+monolithic coupled velocity-pressure solve).
+
+Adds a residual-based momentum stabilisation term and a grad-div
+term, using stabilisation parameters tau_K, tau_C computed from
+a streamline-aligned (directional) element length. Designed to
+pair with the direction_magnitude_combined anisotropic metric
+and, for equal-order (P1-P1) velocity-pressure, with Fluidity's
+existing P1-P1 pressure stabilisation (the kmk term already
+present in the pressure correction step).
+
+&lt;b&gt;Under testing.&lt;/b&gt;</a:documentation>
+      <optional>
+        <element name="c1">
+          <a:documentation>Constant c1 in the tau_C formula (eq. 13). Defaults to 4.0.</a:documentation>
+          <ref name="real"/>
+        </element>
+      </optional>
+      <optional>
+        <element name="c2">
+          <a:documentation>Constant c2 in the tau_C formula (eq. 13). Defaults to 2.0.</a:documentation>
+          <ref name="real"/>
+        </element>
+      </optional>
+    </element>
+  </define>
   <define name="advection_stabilisation_options">
     <element name="stabilisation">
       <a:documentation>Stabilisation options for the galerkin discretisation</a:documentation>
@@ -192,6 +225,7 @@ is not integrated by parts.
         <ref name="no_stabilisation"/>
         <ref name="su_stabilisation"/>
         <ref name="supg_stabilisation"/>
+        <ref name="vms_stabilisation"/>
       </choice>
     </element>
   </define>

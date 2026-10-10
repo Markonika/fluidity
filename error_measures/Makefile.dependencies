@@ -5,7 +5,8 @@
 Anisotropic_Vector_Metric.o ../include/anisotropic_vector_metric.mod: \
    Anisotropic_Vector_Metric.F90 ../include/fdebug.h \
    ../include/field_options.mod ../include/fields.mod ../include/fldebug.mod \
-   ../include/form_metric_field.mod ../include/halos.mod \
+   ../include/form_metric_field.mod ../include/global_parameters.mod \
+   ../include/halos.mod \
    ../include/merge_tensors.mod ../include/metric_tools.mod \
    ../include/parallel_fields.mod ../include/parallel_tools.mod \
    ../include/sparse_tools.mod ../include/spud.mod ../include/state_module.mod \
