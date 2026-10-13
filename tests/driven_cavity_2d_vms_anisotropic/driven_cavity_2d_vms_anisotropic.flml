@@ -217,12 +217,14 @@
               <x_component>
                 <python>
                   <string_value type="code" language="python" lines="20">def val(X,t):
-  if(X[0]&lt;1e-3):
-    return 0.0
-  elif(X[0]&gt;1.-1e-3):
-    return 0.0
-  else:
-    return 1.0</string_value>
+  # Botella & Peyret (1998) regularised lid velocity profile:
+  # u(x) = (1 - (2x-1)^8)^2, smooth (C^7) and zero-derivative at both
+  # top corners, avoiding the velocity-discontinuity corner
+  # singularity of a plain top-hat/leaky lid (which otherwise swamps
+  # vorticity-based mesh adaptivity with an artificial spike at the
+  # lid corners instead of the physical secondary corner vortices).
+  xi = 2.0*X[0] - 1.0
+  return (1.0 - xi**8)**2</string_value>
                 </python>
               </x_component>
               <y_component>
@@ -295,7 +297,7 @@
               <real_value rank="0">1.5</real_value>
             </p_norm>
             <target_nodes>
-              <integer_value rank="0">15000</integer_value>
+              <integer_value rank="0">40000</integer_value>
             </target_nodes>
           </direction_magnitude_combined>
         </adaptivity_options>
@@ -342,6 +344,34 @@
         <steady_state>
           <exclude_from_steady_state/>
         </steady_state>
+        <adaptivity_options>
+          <absolute_measure>
+            <scalar_field rank="0" name="InterpolationErrorBound">
+              <prescribed>
+                <value name="WholeMesh">
+                  <constant>
+                    <real_value rank="0">0.1</real_value>
+                  </constant>
+                </value>
+                <output>
+                  <exclude_from_vtu/>
+                </output>
+                <stat>
+                  <exclude_from_stat/>
+                </stat>
+                <detectors>
+                  <exclude_from_detectors/>
+                </detectors>
+                <particles>
+                  <exclude_from_particles/>
+                </particles>
+              </prescribed>
+            </scalar_field>
+            <p_norm>
+              <integer_value rank="0">2</integer_value>
+            </p_norm>
+          </absolute_measure>
+        </adaptivity_options>
       </diagnostic>
     </scalar_field>
   </material_phase>
@@ -351,7 +381,7 @@
         <integer_value rank="0">10</integer_value>
       </period_in_timesteps>
       <maximum_number_of_nodes>
-        <integer_value rank="0">30000</integer_value>
+        <integer_value rank="0">70000</integer_value>
       </maximum_number_of_nodes>
       <enable_gradation>
         <gradation_parameter>
