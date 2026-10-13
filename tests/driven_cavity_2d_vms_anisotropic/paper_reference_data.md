@@ -98,3 +98,72 @@ Present work: p_min = -0.1319, p_max = 0.9142
 3. Corner vortex centres (once resolved) can be compared in spirit against
    the pattern in Table 3-4 of Hachem et al. 2010, bearing in mind our Re
    falls between their tabulated 1,000 and 10,000 rows.
+
+## 5. Verified 2D reference quantities (Nika, "Lid-Driven Cavity Flow from
+Re=1e2 to 1e6" review, 2026), independent of Hachem/Coupez, derived from
+the audited acenumerics benchmark and Burggraf (1966)/Erturk et al. theory
+
+These are the most precise, directly-comparable 2D targets available,
+since they are Re=5000-specific and come from a verified numerical
+benchmark (not a transcription-error-prone digitisation):
+
+- Core vorticity (Batchelor-Burggraf uniform-vorticity core), Re=5000:
+  **|omega_c| = 1.941** (acenumerics, verified), consistent with the
+  fitted asymptotic law |omega_c| = 1.870 + 4.99*Re^-1/2 -> 1.9406 at
+  Re=5000. Asymptotic value as Re->infinity: 1.886 (Burggraf 1966).
+- Centre velocity u(0.5,0.5), Re=5000: **-0.0321** (acenumerics).
+- Moffatt (1964) corner-eddy sequence ratios (Re-independent, local
+  Stokes-flow theory near a 90-degree corner): successive deep corner
+  eddies shrink in size by a factor **16.57** and weaken in
+  stream-function magnitude by a factor **3.63e4**; acenumerics
+  confirms 16.4-18.3 and (3.5-4.1)e4 respectively. Only resolvable with
+  deep, very fine corner mesh refinement (each deeper eddy needs ~17x
+  finer local resolution) -- not expected to be visible with our
+  current corner refinement (element size ~0.003, versus the
+  ~0.0007L needed to resolve a 3rd/4th-order eddy at Re~1000).
+
+**Important caveat on 3D experimental data** (Prasad & Koseff 1989 LDA,
+Liberzon et al. 2011 PIV): the review found that real (3D, finite-span)
+cavities rotate at only 15-30% of the 2D core vorticity, essentially
+independent of Re from 1480 to 7e5, due to end-wall friction (a 2D
+solver "agreeing" with 3D experimental centreline data would be agreeing
+for the wrong reason). **3D experimental data is therefore not a valid
+quantitative target for this 2D code** -- only the 2D numerical/
+theoretical references above are.
+
+The review also explicitly recommends regularising the lid-corner
+velocity discontinuity for any corner-sensitive validation (its exact
+words: "a validation report should state which is done") -- this run
+uses the Botella & Peyret (1998) regularised lid profile
+u(x) = (1-(2x-1)^8)^2 for exactly this reason.
+
+## 6. Results obtained (this run, final validated configuration:
+anisotropic direction+magnitude + vorticity-Hessian metric, smoothed
+lid BC, no VMS stabilisation -- see commit history for why VMS was
+tried and then disabled)
+
+- Core vorticity at (0.5,0.5): **-1.29** (66% of the verified -1.941
+  reference; -1.33 at t=64, -1.29 at t=80 -- converged, not transient).
+- u(0.5,0.5): **-0.0206** (64% of the verified -0.0321 reference).
+- Primary vortex centre (streamfunction extremum): **(0.513, 0.533)**,
+  matching the Hachem et al. Re=10,000 primary at (0.511, 0.531)
+  closely (expected to be even closer to centre at our lower Re).
+- Distinct secondary vortices resolved: **4** (primary + bottom-left +
+  bottom-right + a newly-resolved top-left), up from 3 (primary +
+  bottom-left + bottom-right only, top-left undetectable) in the
+  initial VMS-stabilised run -- approaching but not yet matching the
+  Table 2 target of 5 at Re=5000.
+- Velocity profile point comparison (Vx along y=0.1, Vy along y=0.05)
+  still shows substantial disagreement with Coupez & Hachem's tabulated
+  values in the mid-domain (e.g. sign flips at some stations), despite
+  the much-improved core vorticity and vortex count -- the near-wall
+  secondary-vortex-driven profile shape is not yet fully converged to
+  the papers' pattern.
+- For context (ablation, same mesh/BC/metric, VMS self-advection +
+  grad-div stabilisation active instead of no_stabilisation): core
+  vorticity only -0.59 (30% of reference), only 3 vortices resolved,
+  BL/BR corner vorticity visually and quantitatively weaker despite
+  being individually larger in this one metric -- VMS was net harmful
+  for this problem as implemented, even after a partial fix (adding
+  the missing pressure-gradient term to the self-advection residual,
+  which closed only part of the gap: -1.06 -> -1.17 at matched time).
