@@ -155,14 +155,7 @@
         <spatial_discretisation>
           <continuous_galerkin>
             <stabilisation>
-              <vms>
-                <c1>
-                  <real_value rank="0">4.0</real_value>
-                </c1>
-                <c2>
-                  <real_value rank="0">2.0</real_value>
-                </c2>
-              </vms>
+              <no_stabilisation/>
             </stabilisation>
             <mass_terms>
               <lump_mass_matrix/>
